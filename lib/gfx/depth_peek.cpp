@@ -309,6 +309,16 @@ void initialize() {
   if (!webgpu::g_hasCoreFeatures) {
     return;
   }
+
+  // The Intel HD Graphics 4000 Metal driver aborts while compiling this optional
+  // compute pipeline (Dawn reports an internal Metal compiler error). Avoid
+  // creating the pipeline on this adapter so the renderer can still start.
+  const std::string_view adapterName{webgpu::g_adapterInfo.device};
+  if (webgpu::g_backendType == wgpu::BackendType::Metal && adapterName.find("HD Graphics 4000") != std::string_view::npos) {
+    Log.warn("Depth Peek is unavailable on Intel HD Graphics 4000 via Metal; skipping compute pipeline");
+    return;
+  }
+
   g_bindGroupLayout = create_bind_group_layout("Depth Peek Bind Group Layout");
   g_pipeline = create_pipeline(g_bindGroupLayout, "Depth Peek Pipeline");
   g_enabled = true;

@@ -27,8 +27,10 @@ using webgpu::g_queue;
 using Clock = std::chrono::steady_clock;
 
 constexpr size_t SlotCount = 3;
-constexpr uint32_t WorkgroupSizeX = 8;
-constexpr uint32_t WorkgroupSizeY = 8;
+// Diagnostic setting: a 1x1 workgroup tests whether Intel's Metal compiler
+// rejects Dawn's max-workgroup-size metadata for the normal 8x8 kernel.
+constexpr uint32_t WorkgroupSizeX = 1;
+constexpr uint32_t WorkgroupSizeY = 1;
 constexpr uint32_t DepthPeekSnapshotHz = 30;
 constexpr auto SnapshotInterval = std::chrono::nanoseconds{1'000'000'000 / DepthPeekSnapshotHz};
 
@@ -113,7 +115,7 @@ fn load_depth(coord: vec2i) -> f32 {
     return textureLoad(src, coord, 0);
 }
 
-@compute @workgroup_size(8, 8, 1)
+@compute @workgroup_size(1, 1, 1)
 fn cs_main(@builtin(global_invocation_id) id: vec3u) {
     if (id.x >= params.dstSize.x || id.y >= params.dstSize.y) {
         return;

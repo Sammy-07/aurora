@@ -31,6 +31,7 @@ constexpr size_t SlotCount = 3;
 // rejects Dawn's max-workgroup-size metadata for the normal 8x8 kernel.
 constexpr uint32_t WorkgroupSizeX = 1;
 constexpr uint32_t WorkgroupSizeY = 1;
+constexpr bool UseMinimalShaderDiagnostic = true;
 constexpr uint32_t DepthPeekSnapshotHz = 30;
 constexpr auto SnapshotInterval = std::chrono::nanoseconds{1'000'000'000 / DepthPeekSnapshotHz};
 
@@ -130,6 +131,10 @@ fn cs_main(@builtin(global_invocation_id) id: vec3u) {
 )"sv;
 
 std::string build_shader_source() {
+  if (UseMinimalShaderDiagnostic) {
+    return "@compute @workgroup_size(1, 1, 1)\nfn cs_main() {}\n";
+  }
+
   std::string source;
   source.reserve(ShaderPreamble.size() + ReversedZBody.size() + ShaderMain.size());
   source += ShaderPreamble;

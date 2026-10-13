@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -163,6 +164,41 @@ wgpu::ComputePipeline create_pipeline(const wgpu::BindGroupLayout& bindGroupLayo
   return g_device.CreateComputePipeline(&pipelineDescriptor);
 }
 
+struct ErrorScopeResult {
+  bool completed = false;
+  wgpu::PopErrorScopeStatus status = wgpu::PopErrorScopeStatus::CallbackCancelled;
+  wgpu::ErrorType type = wgpu::ErrorType::NoError;
+  std::string message;
+};
+
+bool pop_error_scope(const char* stage) {
+  auto result = std::make_shared<ErrorScopeResult>();
+  const auto future = g_device.PopErrorScope(
+      wgpu::CallbackMode::WaitAnyOnly,
+      [result](wgpu::PopErrorScopeStatus status, wgpu::ErrorType type, wgpu::StringView message) {
+        result->completed = true;
+        result->status = status;
+        result->type = type;
+        result->message = std::string{std::string_view{message}};
+      });
+  const auto waitStatus = g_instance.WaitAny(future, 5'000'000'000);
+  if (waitStatus != wgpu::WaitStatus::Success || !result->completed) {
+    Log.error("Depth Peek {} error-scope callback did not complete (wait status {})", stage,
+              magic_enum::enum_name(waitStatus));
+    return false;
+  }
+  if (result->status != wgpu::PopErrorScopeStatus::Success) {
+    Log.error("Depth Peek {} error-scope pop failed: {}", stage, magic_enum::enum_name(result->status));
+    return false;
+  }
+  if (result->type != wgpu::ErrorType::NoError) {
+    Log.error("Depth Peek {} failed with WebGPU error {}: {}", stage, magic_enum::enum_name(result->type),
+              result->message);
+    return false;
+  }
+  return true;
+}
+
 wgpu::BindGroupLayout create_bind_group_layout(const char* label) {
   constexpr std::array entries{
       wgpu::BindGroupLayoutEntry{
@@ -310,18 +346,27 @@ void initialize() {
     return;
   }
 
-  // The Intel HD Graphics 4000 Metal driver aborts while compiling this optional
-  // compute pipeline (Dawn reports an internal Metal compiler error). Avoid
-  // creating the pipeline on this adapter so the renderer can still start.
-  const std::string_view adapterName{webgpu::g_adapterInfo.device};
-  if (webgpu::g_backendType == wgpu::BackendType::Metal && adapterName.find("HD Graphics 4000") != std::string_view::npos) {
-    Log.warn("Depth Peek is unavailable on Intel HD Graphics 4000 via Metal; skipping compute pipeline");
-    return;
-  }
-
+  // Capture pipeline creation errors so unsupported drivers can be diagnosed
+  // without letting the global uncaptured-error handler abort renderer startup.
+  g_device.PushErrorScope(wgpu::ErrorFilter::OutOfMemory);
+  g_device.PushErrorScope(wgpu::ErrorFilter::Internal);
+  g_device.PushErrorScope(wgpu::ErrorFilter::Validation);
   g_bindGroupLayout = create_bind_group_layout("Depth Peek Bind Group Layout");
   g_pipeline = create_pipeline(g_bindGroupLayout, "Depth Peek Pipeline");
-  g_enabled = true;
+  const bool validationOk = pop_error_scope("validation");
+  const bool internalOk = pop_error_scope("internal");
+  const bool outOfMemoryOk = pop_error_scope("out-of-memory");
+  g_enabled = validationOk && internalOk && outOfMemoryOk && static_cast<bool>(g_bindGroupLayout) &&
+              static_cast<bool>(g_pipeline);
+  if (!g_enabled) {
+    Log.warn("Depth Peek is unavailable on {} via {}", webgpu::g_adapterInfo.device,
+             magic_enum::enum_name(webgpu::g_backendType));
+    g_pipeline = {};
+    g_bindGroupLayout = {};
+    return;
+  }
+  Log.info("Depth Peek pipeline initialized on {} via {}", webgpu::g_adapterInfo.device,
+           magic_enum::enum_name(webgpu::g_backendType));
 }
 
 void shutdown() {

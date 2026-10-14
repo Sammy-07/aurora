@@ -84,6 +84,14 @@ if ("${_dawn_system}-${_dawn_arch}" MATCHES "^(windows-(amd64|arm64)|linux-(x86_
   set(_has_dawn_package TRUE)
 endif ()
 
+option(AURORA_DAWN_INTEL_HD4000_MSL_WORKAROUND
+  "Build Dawn from source and omit the MSL workgroup-size attribute for one-thread kernels"
+  OFF)
+
+if (AURORA_DAWN_INTEL_HD4000_MSL_WORKAROUND)
+  set(AURORA_DAWN_PROVIDER "vendor" CACHE STRING "" FORCE)
+endif ()
+
 # ── Auto: resolve provider based on platform availability ──
 set(_aurora_dawn_provider "${AURORA_DAWN_PROVIDER}")
 if (_aurora_dawn_provider STREQUAL "auto")
@@ -133,10 +141,20 @@ if (_aurora_dawn_provider STREQUAL "vendor")
     endif ()
 
     include(FetchContent)
+    set(_dawn_patch_options)
+    if (AURORA_DAWN_INTEL_HD4000_MSL_WORKAROUND)
+      find_package(Git REQUIRED)
+      list(APPEND _dawn_patch_options
+        PATCH_COMMAND "${GIT_EXECUTABLE}" apply
+        "${CMAKE_CURRENT_LIST_DIR}/patches/dawn-intel-single-thread-workgroup-metadata.patch")
+      message(WARNING
+        "aurora: Applying experimental Dawn workaround for Intel HD 4000 Metal compilation")
+    endif ()
     FetchContent_Declare(dawn
       URL "https://github.com/encounter/dawn/archive/${AURORA_DAWN_REF}.tar.gz"
       DOWNLOAD_EXTRACT_TIMESTAMP FALSE
       EXCLUDE_FROM_ALL
+      ${_dawn_patch_options}
     )
     FetchContent_MakeAvailable(dawn)
     if (NOT TARGET webgpu_dawn)
